@@ -1,0 +1,20 @@
+{
+  "name": "warmane-armory-bot",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node src/index.js",
+    "register": "node src/index.js --register",
+    "clear": "node clear-commands.js"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "cheerio": "^1.0.0-rc.12",
+    "discord.js": "^14.15.3",
+    "dotenv": "^16.4.5",
+    "luxon": "^3.4.4",
+    "pino": "^9.3.2",
+    "better-sqlite3": "^9.4.0",
+    "canvas": "^2.11.2"
+  }
+}
