@@ -3,4 +3,9 @@ node_modules
 data/cache.db
 npm-debug.log*
 pnpm-lock.yaml
-data/.*
+data
+/data/cache.db-shm
+/data/cache.db-wal
+/data/items.db
+/data/items.db-shm
+/data/items.db-wal

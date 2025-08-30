@@ -3,7 +3,7 @@ services:
     name: warmane-armory-bot
     env: node
     plan: free
-    buildCommand: npm install
+    buildCommand: ./render-build.sh
     startCommand: npm start
     envVars:
       - key: NODE_ENV
