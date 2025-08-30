@@ -1,8 +1,7 @@
 services:
-  - type: web
+  - type: worker
     name: warmane-armory-bot
-    env: node
-    plan: free
+    runtime: node
     buildCommand: ./render-build.sh
     startCommand: npm start
     envVars:

@@ -1,14 +1,20 @@
 #!/bin/bash
+set -e
 
-# Install system dependencies for canvas and better-sqlite3
+# Install system dependencies for canvas
 apt-get update
-apt-get install -y build-essential libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev python3
+apt-get install -y \
+    build-essential \
+    libcairo2-dev \
+    libpango1.0-dev \
+    libjpeg-dev \
+    libgif-dev \
+    librsvg2-dev \
+    pkg-config
 
-# Set Node.js to use a compatible version
-export NODE_OPTIONS="--max-old-space-size=1024"
+# Use npm instead of bun for better compatibility
+npm ci --no-optional
 
-# Install dependencies with verbose logging
-npm ci --verbose
-
-# Rebuild better-sqlite3 for the current platform
+# Rebuild native dependencies
+npm rebuild canvas
 npm rebuild better-sqlite3
