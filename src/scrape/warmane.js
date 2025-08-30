@@ -1,3 +1,4 @@
+// src/scrape/warmane.js
 import axios from 'axios';
 import { load } from 'cheerio';
 import Database from 'better-sqlite3';
@@ -16,7 +17,6 @@ DB.prepare(`CREATE TABLE IF NOT EXISTS cache (
   created_at INTEGER NOT NULL
 )`).run();
 
-// cache dedicado p/ itens (nome/ilvl) — vive mais
 DB.prepare(`CREATE TABLE IF NOT EXISTS item_cache (
   item_id INTEGER PRIMARY KEY,
   name TEXT,
@@ -48,14 +48,13 @@ function buildUrl({ name, realm }) {
   return `https://armory.warmane.com/character/${encodeURIComponent(name)}/${normalizeRealm(realm)}/summary`;
 }
 
-// ——— util: força https/absoluto
 function abs(url) {
   if (!url) return null;
   if (/^https?:\/\//i.test(url)) return url.replace(/^http:/, 'https:');
   return `https:${url}`;
 }
 
-// ====== lookup de nome/ilvl no Cavern of Time (opcional) ======
+// ====== lookup opcional ======
 function getItemCache(itemId) {
   const row = DB.prepare('SELECT name, ilvl, fetched_at FROM item_cache WHERE item_id = ?').get(itemId);
   if (!row) return null;
@@ -74,7 +73,6 @@ async function fetchItemMeta(itemId) {
   if (cached) return cached;
 
   try {
-    // HTTPS + cabeçalhos — ajuda a evitar bloqueio
     const url = `https://wotlk.cavernoftime.com/item=${itemId}`;
     const res = await axios.get(url, {
       headers: {
@@ -86,7 +84,7 @@ async function fetchItemMeta(itemId) {
     });
 
     const $ = load(res.data);
-    const title = $('title').first().text().trim(); // "Shadowmourne - WotLK Classic Database"
+    const title = $('title').first().text().trim();
     const name = title.replace(/\s+-\s+.*$/i, '').trim();
 
     let ilvl = null;
@@ -117,7 +115,7 @@ export async function scrapeWarmaneArmory({ name, realm }) {
 
   const $ = load(resp.data);
 
-  // ——— header
+  // header
   const charName = $('.information .information-left .name').first().text().trim()
     || $('div.name').first().text().trim();
   const levelRaceClass = $('.information .level-race-class').first().text().trim();
@@ -128,7 +126,7 @@ export async function scrapeWarmaneArmory({ name, realm }) {
   const rawThumb = $('#character-profile .item-left .item-slot img').first().attr('src') || null;
   const thumbUrl = abs(rawThumb);
 
-  // ——— gear
+  // gear
   const gearSlots = {};
   const leftOrder  = ['Head','Neck','Shoulder','Back','Chest','Shirt','Tabard','Wrist'];
   const rightOrder = ['Hands','Waist','Legs','Feet','Ring1','Ring2','Trinket1','Trinket2'];
@@ -136,32 +134,20 @@ export async function scrapeWarmaneArmory({ name, realm }) {
 
   let idx = 0;
   $('#character-profile .item-model .item-left .item-slot').each((_, el) => {
-    const slotName = leftOrder[idx] || `Left${idx+1}`;
-    idx++;
-    const it = parseSlot($, el);
-    // Sempre adiciona o slot, mesmo se vazio
-    gearSlots[slotName] = it;
+    const slotName = leftOrder[idx] || `Left${idx+1}`; idx++;
+    gearSlots[slotName] = parseSlot($, el);
   });
-
   idx = 0;
   $('#character-profile .item-model .item-right .item-slot').each((_, el) => {
-    const slotName = rightOrder[idx] || `Right${idx+1}`;
-    idx++;
-    const it = parseSlot($, el);
-    // Sempre adiciona o slot, mesmo se vazio
-    gearSlots[slotName] = it;
+    const slotName = rightOrder[idx] || `Right${idx+1}`; idx++;
+    gearSlots[slotName] = parseSlot($, el);
   });
-
   idx = 0;
   $('#character-profile .item-model .item-bottom .item-slot').each((_, el) => {
-    const slotName = bottomOrder[idx] || `Weapon${idx+1}`;
-    idx++;
-    const it = parseSlot($, el);
-    // Sempre adiciona o slot, mesmo se vazio
-    gearSlots[slotName] = it;
+    const slotName = bottomOrder[idx] || `Weapon${idx+1}`; idx++;
+    gearSlots[slotName] = parseSlot($, el);
   });
 
-  // lookup opcional (para nomes/ilvl)
   if (ENABLE_ITEM_LOOKUP) {
     const entries = Object.values(gearSlots).filter(g => g.itemId);
     for (const it of entries) {
@@ -171,7 +157,7 @@ export async function scrapeWarmaneArmory({ name, realm }) {
     }
   }
 
-  // ——— stats
+  // stats
   const statBlocks = $('.character-stats .stub .text');
   const stats = {};
   statBlocks.each((_, el) => {
@@ -191,7 +177,7 @@ export async function scrapeWarmaneArmory({ name, realm }) {
     }
   });
 
-  // ——— professions
+  // professions
   const professions = [];
   $('.profskills .stub .text').each((_, el) => {
     const t = $(el).text().trim().replace(/\s+/g, ' ');
@@ -199,7 +185,7 @@ export async function scrapeWarmaneArmory({ name, realm }) {
     if (m) professions.push({ name: m[1].trim(), value: m[2].replace(/\s+/g, '') });
   });
 
-  // ——— recent
+  // recent
   const recent = [];
   $('.recent-activity .stub .text').each((_, el) => {
     const t = $(el).text().trim().replace(/\s+/g, ' ');
@@ -225,23 +211,130 @@ export async function scrapeWarmaneArmory({ name, realm }) {
   return data;
 }
 
-// ——— helpers
+// === talents ===
+function buildTalentsUrl({ name, realm }) {
+  return `https://armory.warmane.com/character/${encodeURIComponent(name)}/${encodeURIComponent(realm)}/talents`;
+}
+
+/**
+ * Scrape de talentos no layout do Warmane.
+ * Retorna:
+ * - trees: 3 árvores com tiers/colunas (até 4 colunas por tier)
+ * - glyphs: {major[], minor[]}
+ * - points: totais por árvore
+ */
+export async function scrapeWarmaneTalents({ name, realm }) {
+  const talentsUrl = buildTalentsUrl({ name, realm });
+  const cacheKey = `talents:${talentsUrl}`;
+  const cached = getCache(cacheKey);
+  if (cached) return cached;
+
+  const resp = await axios.get(talentsUrl, {
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Warmane Armory Bot for Discord; +https://example.com)',
+      'Accept-Language': 'en-US,en;q=0.9'
+    },
+    timeout: 15000
+  });
+  const $ = load(resp.data);
+
+  // header
+  const charName = $('.information .information-left .name').first().text().trim()
+    || $('div.name').first().text().trim() || name;
+  const raceClass = $('.information .level-race-class').first().text().trim();
+  const profileUrl = $('a[href*="/summary"]').first().attr('href')
+    ? `https://armory.warmane.com${$('a[href*="/summary"]').first().attr('href')}`
+    : `https://armory.warmane.com/character/${encodeURIComponent(name)}/${encodeURIComponent(realm)}/summary`;
+
+  // portrait
+  let thumbUrl = null;
+  const thumbGuess = $('img.character-portrait').attr('src') || $('#character-profile .item-left .item-slot img').first().attr('src');
+  if (thumbGuess) thumbUrl = abs(thumbGuess);
+
+  // spec ativa
+  let activeSpecIndex = 0;
+  const activeTd = $('table.talent-spec-switch td.selected').attr('data-spec');
+  if (activeTd) activeSpecIndex = parseInt(activeTd, 10) || 0;
+
+  // glyphs do spec ativo
+  const glyphs = { major: [], minor: [] };
+  const glyphBox = $(`.character-glyphs div[data-glyphs="${activeSpecIndex}"]`).first();
+  glyphBox.find('.glyph.major a').each((_, a) => glyphs.major.push($(a).text().trim()));
+  glyphBox.find('.glyph.minor a').each((_, a) => glyphs.minor.push($(a).text().trim()));
+
+  // árvores do spec ativo
+  const trees = [];
+  const points = {}; // somente as árvores que existem
+  const specDiv = $(`#spec-${activeSpecIndex}`);
+  const frames = specDiv.find('.talent-frame');
+
+  frames.each((_, frameEl) => {
+    const treeEl = $(frameEl).find('.talent-tree').first();
+
+    // nome + total
+    const info = $(treeEl).find('.talent-tree-info').first().text().replace(/\s+/g, ' ').trim();
+    let treeName = 'Tree';
+    let treePts = 0;
+    const m = info.match(/([A-Za-z]+)\s+(\d+)/);
+    if (m) { treeName = m[1]; treePts = parseInt(m[2], 10) || 0; }
+    points[treeName] = treePts;
+
+    // tiers/linhas
+    const tiers = [];
+    $(treeEl).find('.tier').each((rowIdx, rowEl) => {
+      const rowTalents = [];
+      $(rowEl).find('a.talent').each((_, a) => {
+        const $a = $(a);
+        const cls = ($a.attr('class') || '').split(/\s+/);
+        const colClass = cls.find(c => /^col[0-3]$/.test(c));
+        const col = colClass ? parseInt(colClass.replace('col', ''), 10) : 0;
+
+        const style = $a.attr('style') || '';
+        const iconRel = (style.match(/url\((.*?)\)/) || [])[1] || null;
+        const icon = abs(iconRel);
+
+        const tp = $a.find('.talent-points').first();
+        const raw = tp.text().trim();  // "2/3"
+        const mm = raw.match(/(\d+)\s*\/\s*(\d+)/);
+        const rank = mm ? parseInt(mm[1], 10) : 0;
+        const max  = mm ? parseInt(mm[2], 10) : 0;
+
+        let state = 'points';
+        if (tp.hasClass('disabled')) state = 'disabled';
+        if (tp.hasClass('max')) state = 'max';
+
+        rowTalents.push({ icon, state, rank, max, xy: { row: rowIdx, col } });
+      });
+      tiers.push(rowTalents);
+    });
+
+    trees.push({ name: treeName, points: treePts, tiers });
+  });
+
+  const data = {
+    talentsUrl,
+    profileUrl,
+    charName,
+    raceClass,
+    trees,
+    glyphs,
+    points,
+    specName:
+      Object.keys(points).reduce((best, k) =>
+        best === null || points[k] > points[best] ? k : best, null) || '',
+    thumbUrl
+  };
+
+  setCache(cacheKey, data);
+  return data;
+}
+
+// ——— helpers ———
 function parseSlot($, el) {
   const a = $(el).find('a[href]').first();
-  
-  // Se não há link, retorna slot vazio ao invés de null
   if (!a.length) {
-    return {
-      href: null,
-      itemId: null,
-      icon: null,
-      name: null,
-      quality: 'Common',
-      enchant: null,
-      gems: []
-    };
+    return { href: null, itemId: null, icon: null, name: null, quality: 'Common', enchant: null, gems: [] };
   }
-  
   const href = a.attr('href');
   const itemId = extractItemId(href);
   const icon = abs($(el).find('img').attr('src') || null);
@@ -257,12 +350,10 @@ function parseSlot($, el) {
 
   return { href, itemId, icon, name: itemName, quality, enchant, gems };
 }
-
 function extractItemId(href) {
   const m = String(href || '').match(/item=(\d+)/);
   return m ? Number(m[1]) : null;
 }
-
 function blockToKv(raw) {
   const out = {};
   const re = /([A-Za-z ]+):\s*([^:]+)/g;
@@ -270,7 +361,6 @@ function blockToKv(raw) {
   while ((m = re.exec(raw)) !== null) out[m[1].trim()] = m[2].trim();
   return out;
 }
-
 function getItemQuality($, el) {
   const qDiv = $(el).find('div.icon-quality').first();
   const classes = (qDiv.attr('class') || '').split(/\s+/);
@@ -297,11 +387,9 @@ function getItemQuality($, el) {
   return 'Common';
 }
 
-// 8. Backup do Banco de Dados
-
-// Para o SQLite, configure backups periódicos:
+// backup opcional
 export function backupDatabase() {
   const backupPath = path.join(DATA_DIR, `cache-backup-${Date.now()}.db`);
   DB.backup(backupPath);
-  log.info(`Database backed up to ${backupPath}`);
+  console.info(`Database backed up to ${backupPath}`);
 }
