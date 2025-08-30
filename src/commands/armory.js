@@ -55,7 +55,6 @@ export const armoryCommand = {
       console.log('Card built successfully');
       
       // Don't convert to base64 - send the raw buffer
-      // const cardBase64 = card.toString('base64');  // Remove this line
       console.log('Card buffer ready, size:', card.length);
       
       const embed = {
