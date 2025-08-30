@@ -9,3 +9,4 @@ data
 /data/items.db
 /data/items.db-shm
 /data/items.db-wal
+package-lock.json

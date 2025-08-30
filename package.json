@@ -6,22 +6,20 @@
     "node": ">=18.0.0 <23.0.0"
   },
   "scripts": {
-    "dev": "node src/index.js",
-    "start": "node src/index.js",
-    "register": "node src/index.js --register",
-    "clear": "node clear-commands.js"
+    "dev": "wrangler dev",
+    "start": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "build": "echo 'No build step required'",
+    "register": "node scripts/register-commands.js"
   },
   "dependencies": {
-    "axios": "^1.6.8",
-    "better-sqlite3": "^9.4.3",
-    "canvas": "^2.11.2",
+    "@cloudflare/puppeteer": "^1.0.4",
     "cheerio": "^1.0.0-rc.12",
-    "discord.js": "^14.15.3",
+    "discord-interactions": "^3.4.0",
     "dotenv": "^16.4.5",
-    "luxon": "^3.4.4",
-    "pino": "^9.3.2"
+    "luxon": "^3.4.4"
   },
   "devDependencies": {
-    "pino-pretty": "^13.1.1"
+    "wrangler": "^4.33.1"
   }
 }

@@ -1,53 +1,117 @@
-import {
-  SlashCommandBuilder,
-  EmbedBuilder,
-  AttachmentBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  ActionRowBuilder
-} from 'discord.js';
 import { scrapeWarmaneTalents } from '../scrape/warmane.js';
 import { buildTalentsCard } from '../render/talentsCard.js';
+import { InteractionResponseType } from 'discord-interactions';
 
 const REALM_DEFAULT = 'Icecrown';
 
-export default {
-  data: new SlashCommandBuilder()
-    .setName('talents')
-    .setDescription('Warmane-like Talents view (trees + glyphs).')
-    .addStringOption(o => o.setName('character').setDescription('Character name').setRequired(true))
-    .addStringOption(o => o.setName('realm').setDescription('Realm (Icecrown, Lordaeron, etc.)')),
-  async execute(interaction) {
-    const name  = interaction.options.getString('character', true).trim();
-    const realm = (interaction.options.getString('realm') || REALM_DEFAULT).trim();
+export const talentsCommand = {
+  name: 'talents',
+  description: 'Warmane-like Talents view (trees + glyphs).',
+  options: [
+    {
+      name: 'character',
+      description: 'Character name',
+      type: 3, // STRING
+      required: true
+    },
+    {
+      name: 'realm',
+      description: 'Realm (Icecrown, Lordaeron, etc.)',
+      type: 3, // STRING
+      required: false
+    }
+  ],
 
-    await interaction.deferReply();
-
-    const data = await scrapeWarmaneTalents({ name, realm });
-    if (!data) {
-      return interaction.editReply(`Could not find **${name}** on **${realm}**.`);
+  async execute(interaction, env) {
+    const { options } = interaction.data;
+    const characterName = options?.find(opt => opt.name === 'character')?.value;
+    const realm = options?.find(opt => opt.name === 'realm')?.value || REALM_DEFAULT;
+    
+    if (!characterName) {
+      return {
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: 'Character name is required.',
+          flags: 64 // Ephemeral
+        }
+      };
     }
 
-    const card = await buildTalentsCard(data);
-    const file = new AttachmentBuilder(card, { name: 'talents.png' });
+    try {
+      const data = await scrapeWarmaneTalents({ name: characterName, realm });
+      if (!data) {
+        return {
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: {
+            content: `Could not find **${characterName}** on **${realm}**.`
+          }
+        };
+      }
 
-    const treesLine = (data.trees || [])
-      .map(t => `${t.name} **${t.points || 0}**`)
-      .join(' • ');
+      const card = await buildTalentsCard(data, env);
+      
+      // Remove the base64 conversion - send raw buffer instead
+      // const cardBase64 = card.toString('base64');
+      
+      const treesLine = (data.trees || [])
+        .map(t => `${t.name} **${t.points || 0}**`)
+        .join(' • ');
 
-    const embed = new EmbedBuilder()
-      .setColor(0x222831)
-      .setTitle(`${data.charName} — ${data.raceClass}`)
-      .setURL(data.talentsUrl)
-      .setDescription(treesLine)
-      .setImage('attachment://talents.png')
-      .setFooter({ text: `Warmane-style • ${realm}` });
+      const embed = {
+        color: 0x222831,
+        title: `${data.charName} — ${data.raceClass}`,
+        url: data.talentsUrl,
+        description: treesLine,
+        image: {
+          url: 'attachment://talents.png'
+        },
+        footer: {
+          text: `Warmane-style • ${realm}`
+        }
+      };
 
-    const buttons = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Open Talents').setURL(data.talentsUrl),
-      new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Open Armory').setURL(data.profileUrl)
-    );
+      const components = [
+        {
+          type: 1, // ACTION_ROW
+          components: [
+            {
+              type: 2, // BUTTON
+              style: 5, // LINK
+              label: 'Open Talents',
+              url: data.talentsUrl
+            },
+            {
+              type: 2, // BUTTON  
+              style: 5, // LINK
+              label: 'Open Armory',
+              url: data.profileUrl
+            }
+          ]
+        }
+      ];
 
-    await interaction.editReply({ embeds: [embed], files: [file], components: [buttons] });
+      return {
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          embeds: [embed],
+          files: [{
+            name: 'talents.png',
+            data: card  // Send raw buffer instead of cardBase64
+          }],
+          components
+        }
+      };
+    } catch (error) {
+      console.error('Talents command error:', error);
+      return {
+        type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+        data: {
+          content: 'Sorry, I couldn\'t fetch the character data. Please try again later.',
+          flags: 64 // Ephemeral
+        }
+      };
+    }
   }
 };
+
+export default talentsCommand;

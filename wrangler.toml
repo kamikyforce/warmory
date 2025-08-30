@@ -1,0 +1,22 @@
+name = "warmane-armory-bot"
+main = "src/worker.js"
+compatibility_date = "2024-09-23"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+DISCORD_APPLICATION_ID = "1411387481890226207"
+REALM_DEFAULT = "Icecrown"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "warmane-armory-db"
+database_id = "06b32e76-9145-4d4a-8417-72813605f72d"
+
+[browser]
+binding = "MYBROWSER"
+
+[build]
+command = "npm run build"
+
+[observability.logs]
+enabled = true

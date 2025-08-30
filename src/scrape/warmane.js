@@ -1,44 +1,52 @@
 // src/scrape/warmane.js
-import axios from 'axios';
 import { load } from 'cheerio';
-import Database from 'better-sqlite3';
-import fs from 'fs';
-import path from 'path';
 
-// ====== setup de cache ======
-const DATA_DIR = path.resolve('./data');
-if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
+// ====== D1 Database setup ======
+let DB = null;
 
-const DB = new Database(path.join(DATA_DIR, 'cache.db'));
-DB.pragma('journal_mode = WAL');
-DB.prepare(`CREATE TABLE IF NOT EXISTS cache (
-  key TEXT PRIMARY KEY,
-  value TEXT NOT NULL,
-  created_at INTEGER NOT NULL
-)`).run();
-
-DB.prepare(`CREATE TABLE IF NOT EXISTS item_cache (
-  item_id INTEGER PRIMARY KEY,
-  name TEXT,
-  ilvl INTEGER,
-  fetched_at INTEGER NOT NULL
-)`).run();
-
-const TTL_MIN = parseInt(process.env.CACHE_TTL_MINUTES || '30', 10);
-const ITEM_TTL_DAYS = parseInt(process.env.ITEM_TTL_DAYS || '7', 10);
-const ENABLE_ITEM_LOOKUP = String(process.env.ENABLE_ITEM_LOOKUP || '1') === '1';
-
-function getCache(key) {
-  const row = DB.prepare('SELECT value, created_at FROM cache WHERE key = ?').get(key);
-  if (!row) return null;
-  const ageMin = (Date.now() - row.created_at) / 60000;
-  if (ageMin > TTL_MIN) return null;
-  try { return JSON.parse(row.value); } catch { return null; }
+function initDB(env) {
+  if (!DB) {
+    DB = env.DB; // Cloudflare D1 database binding
+  }
+  return DB;
 }
-function setCache(key, value) {
-  DB.prepare('REPLACE INTO cache (key, value, created_at) VALUES (?, ?, ?)').run(
+
+// Initialize tables (called once during worker startup)
+export async function initializeTables(env) {
+  const db = initDB(env);
+  
+  await db.prepare(`CREATE TABLE IF NOT EXISTS cache (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+  )`).run();
+
+  await db.prepare(`CREATE TABLE IF NOT EXISTS item_cache (
+    item_id INTEGER PRIMARY KEY,
+    name TEXT,
+    ilvl INTEGER,
+    fetched_at INTEGER NOT NULL
+  )`).run();
+}
+
+const TTL_MIN = 30; // Default cache TTL in minutes
+const ITEM_TTL_DAYS = 7; // Default item cache TTL in days
+const ENABLE_ITEM_LOOKUP = true;
+
+async function getCache(key, env) {
+  const db = initDB(env);
+  const result = await db.prepare('SELECT value, created_at FROM cache WHERE key = ?').bind(key).first();
+  if (!result) return null;
+  const ageMin = (Date.now() - result.created_at) / 60000;
+  if (ageMin > TTL_MIN) return null;
+  try { return JSON.parse(result.value); } catch { return null; }
+}
+
+async function setCache(key, value, env) {
+  const db = initDB(env);
+  await db.prepare('REPLACE INTO cache (key, value, created_at) VALUES (?, ?, ?)').bind(
     key, JSON.stringify(value), Date.now()
-  );
+  ).run();
 }
 
 function normalizeRealm(realm) {
@@ -54,66 +62,71 @@ function abs(url) {
   return `https:${url}`;
 }
 
-// ====== lookup opcional ======
-function getItemCache(itemId) {
-  const row = DB.prepare('SELECT name, ilvl, fetched_at FROM item_cache WHERE item_id = ?').get(itemId);
-  if (!row) return null;
-  const ageDays = (Date.now() - row.fetched_at) / (24 * 60 * 60 * 1000);
+// ====== Item lookup with D1 ======
+async function getItemCache(itemId, env) {
+  const db = initDB(env);
+  const result = await db.prepare('SELECT name, ilvl, fetched_at FROM item_cache WHERE item_id = ?').bind(itemId).first();
+  if (!result) return null;
+  const ageDays = (Date.now() - result.fetched_at) / (24 * 60 * 60 * 1000);
   if (ageDays > ITEM_TTL_DAYS) return null;
-  return { name: row.name, ilvl: row.ilvl ?? null };
-}
-function setItemCache(itemId, name, ilvl) {
-  DB.prepare('REPLACE INTO item_cache (item_id, name, ilvl, fetched_at) VALUES (?, ?, ?, ?)').run(
-    itemId, name || null, ilvl || null, Date.now()
-  );
+  return { name: result.name, ilvl: result.ilvl ?? null };
 }
 
-async function fetchItemMeta(itemId) {
-  const cached = getItemCache(itemId);
+async function setItemCache(itemId, name, ilvl, env) {
+  const db = initDB(env);
+  await db.prepare('REPLACE INTO item_cache (item_id, name, ilvl, fetched_at) VALUES (?, ?, ?, ?)').bind(
+    itemId, name || null, ilvl || null, Date.now()
+  ).run();
+}
+
+async function fetchItemMeta(itemId, env) {
+  const cached = await getItemCache(itemId, env);
   if (cached) return cached;
 
   try {
     const url = `https://wotlk.cavernoftime.com/item=${itemId}`;
-    const res = await axios.get(url, {
+    const res = await fetch(url, {
       headers: {
         'User-Agent': 'Warmane Armory Bot (+https://github.com/you/armory-bot)',
         'Accept-Language': 'en-US,en;q=0.9,pt-BR;q=0.7',
         'Referer': 'https://armory.warmane.com/'
-      },
-      timeout: 15000
+      }
     });
 
-    const $ = load(res.data);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const html = await res.text();
+    const $ = load(html);
     const title = $('title').first().text().trim();
     const name = title.replace(/\s+-\s+.*$/i, '').trim();
 
     let ilvl = null;
-    const ilvlMatch = res.data.match(/Item Level\s*(\d{1,3})/i);
+    const ilvlMatch = html.match(/Item Level\s*(\d{1,3})/i);
     if (ilvlMatch) ilvl = parseInt(ilvlMatch[1], 10);
 
-    setItemCache(itemId, name || null, ilvl || null);
+    await setItemCache(itemId, name || null, ilvl || null, env);
     return { name, ilvl };
   } catch {
-    setItemCache(itemId, null, null);
+    await setItemCache(itemId, null, null, env);
     return { name: null, ilvl: null };
   }
 }
 
-export async function scrapeWarmaneArmory({ name, realm }) {
+export async function scrapeWarmaneArmory({ name, realm }, env) {
   const url = buildUrl({ name, realm });
   const cacheKey = `armory:${url}`;
-  const cached = getCache(cacheKey);
+  const cached = await getCache(cacheKey, env);
   if (cached) return cached;
 
-  const resp = await axios.get(url, {
+  const resp = await fetch(url, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Warmane Armory Bot for Discord; +https://example.com)',
       'Accept-Language': 'en-US,en;q=0.9'
-    },
-    timeout: 15000
+    }
   });
 
-  const $ = load(resp.data);
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const html = await resp.text();
+  const $ = load(html);
 
   // header
   const charName = $('.information .information-left .name').first().text().trim()
@@ -151,7 +164,7 @@ export async function scrapeWarmaneArmory({ name, realm }) {
   if (ENABLE_ITEM_LOOKUP) {
     const entries = Object.values(gearSlots).filter(g => g.itemId);
     for (const it of entries) {
-      const meta = await fetchItemMeta(it.itemId);
+      const meta = await fetchItemMeta(it.itemId, env);
       if (meta?.name) it.name = meta.name;
       if (meta?.ilvl) it.ilvl = meta.ilvl;
     }
@@ -207,7 +220,7 @@ export async function scrapeWarmaneArmory({ name, realm }) {
     thumbUrl
   };
 
-  setCache(cacheKey, data);
+  await setCache(cacheKey, data, env);
   return data;
 }
 
@@ -216,27 +229,22 @@ function buildTalentsUrl({ name, realm }) {
   return `https://armory.warmane.com/character/${encodeURIComponent(name)}/${encodeURIComponent(realm)}/talents`;
 }
 
-/**
- * Scrape de talentos no layout do Warmane.
- * Retorna:
- * - trees: 3 árvores com tiers/colunas (até 4 colunas por tier)
- * - glyphs: {major[], minor[]}
- * - points: totais por árvore
- */
-export async function scrapeWarmaneTalents({ name, realm }) {
+export async function scrapeWarmaneTalents({ name, realm }, env) {
   const talentsUrl = buildTalentsUrl({ name, realm });
   const cacheKey = `talents:${talentsUrl}`;
-  const cached = getCache(cacheKey);
+  const cached = await getCache(cacheKey, env);
   if (cached) return cached;
 
-  const resp = await axios.get(talentsUrl, {
+  const resp = await fetch(talentsUrl, {
     headers: {
       'User-Agent': 'Mozilla/5.0 (Warmane Armory Bot for Discord; +https://example.com)',
       'Accept-Language': 'en-US,en;q=0.9'
-    },
-    timeout: 15000
+    }
   });
-  const $ = load(resp.data);
+  
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  const html = await resp.text();
+  const $ = load(html);
 
   // header
   const charName = $('.information .information-left .name').first().text().trim()
@@ -325,7 +333,7 @@ export async function scrapeWarmaneTalents({ name, realm }) {
     thumbUrl
   };
 
-  setCache(cacheKey, data);
+  await setCache(cacheKey, data, env);
   return data;
 }
 
@@ -385,11 +393,4 @@ function getItemQuality($, el) {
   if (style.includes('#1eff00') || style.includes('green')) return 'Uncommon';
   if (style.includes('#9d9d9d') || style.includes('gray')) return 'Poor';
   return 'Common';
-}
-
-// backup opcional
-export function backupDatabase() {
-  const backupPath = path.join(DATA_DIR, `cache-backup-${Date.now()}.db`);
-  DB.backup(backupPath);
-  console.info(`Database backed up to ${backupPath}`);
 }
