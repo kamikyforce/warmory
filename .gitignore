@@ -3,4 +3,4 @@ node_modules
 data/cache.db
 npm-debug.log*
 pnpm-lock.yaml
-data/*
+data/.*
