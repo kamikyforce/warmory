@@ -5,12 +5,20 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import fs from 'fs';
 
-const log = pino({ 
-  level: process.env.NODE_ENV === 'production' ? 'info' : 'debug',
-  transport: process.env.NODE_ENV !== 'production' ? {
-    target: 'pino-pretty'
-  } : undefined
-});
+// Configuração segura do logger
+let logConfig = { level: process.env.NODE_ENV === 'production' ? 'info' : 'debug' };
+
+// Tenta usar pino-pretty apenas se estiver disponível
+if (process.env.NODE_ENV !== 'production') {
+  try {
+    await import('pino-pretty');
+    logConfig.transport = { target: 'pino-pretty' };
+  } catch {
+    // pino-pretty não disponível, usa formato padrão
+  }
+}
+
+const log = pino(logConfig);
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
