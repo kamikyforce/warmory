@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: warmane-armory-bot
+    env: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DISCORD_TOKEN
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: GUILD_ID
+        sync: false
+      - key: CACHE_TTL_MINUTES
+        value: "30"
+      - key: ENABLE_ITEM_LOOKUP
+        value: "1"
+      - key: ITEM_TTL_DAYS
+        value: "7"
