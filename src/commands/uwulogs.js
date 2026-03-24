@@ -96,7 +96,7 @@ export const uwulogsCommand = {
       }
       const overall = (raw.overallPoints / 100).toFixed(2);
       const linkSpec = Number.isInteger(raw?.usedSpec) ? raw.usedSpec : (Number.isInteger(spec) ? spec : SPEC_DEFAULT);
-      const url = `https://uwu-logs.xyz/character?name=${encodeURIComponent(name)}&server=${encodeURIComponent(server)}&spec=${linkSpec}`;
+      const url = `https://uwu-logs.xyz/character?name=${encodeURIComponent(raw.name)}&server=${encodeURIComponent(raw.server)}&spec=${linkSpec}`;
       const embed = {
         color: 0x7b68ee,
         title: `${raw.name} — ${raw.server}`,
