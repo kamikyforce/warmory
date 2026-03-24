@@ -85,6 +85,7 @@ export const uwulogsCommand = {
           raw = await scrapeUwULogs({ name, server, spec });
         } else {
           spec = SPEC_DEFAULT;
+          raw = await scrapeUwULogs({ name, server, spec });
         }
       }
       let card = null;
@@ -94,7 +95,8 @@ export const uwulogsCommand = {
         console.error('uwulogs render error', e);
       }
       const overall = (raw.overallPoints / 100).toFixed(2);
-      const url = `https://uwu-logs.xyz/character?name=${encodeURIComponent(name)}&server=${encodeURIComponent(server)}&spec=${spec}`;
+      const linkSpec = Number.isInteger(raw?.usedSpec) ? raw.usedSpec : (Number.isInteger(spec) ? spec : SPEC_DEFAULT);
+      const url = `https://uwu-logs.xyz/character?name=${encodeURIComponent(name)}&server=${encodeURIComponent(server)}&spec=${linkSpec}`;
       const embed = {
         color: 0x7b68ee,
         title: `${raw.name} — ${raw.server}`,

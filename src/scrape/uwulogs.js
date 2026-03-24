@@ -26,10 +26,11 @@ async function postCharacter(body) {
 }
 
 export async function scrapeUwULogs({ name, server, spec }) {
+  let effectiveSpec = spec ? Number(spec) : undefined;
   const initial = {
     name,
     server,
-    spec: spec ? Number(spec) : undefined
+    spec: effectiveSpec
   };
   let res = await postCharacter(initial);
   if (!res.ok) {
@@ -37,13 +38,14 @@ export async function scrapeUwULogs({ name, server, spec }) {
     const fallback = {
       name: normName(name),
       server: normServer(server),
-      spec: spec ? Number(spec) : undefined
+      spec: effectiveSpec
     };
     if (!fallback.spec) fallback.spec = undefined;
     res = await postCharacter(fallback);
     if (!res.ok) {
       // last chance: force spec 1 with sanitized inputs
-      const f2 = { ...fallback, spec: 1 };
+      effectiveSpec = 1;
+      const f2 = { ...fallback, spec: effectiveSpec };
       res = await postCharacter(f2);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     }
@@ -67,6 +69,7 @@ export async function scrapeUwULogs({ name, server, spec }) {
     overallPoints: typeof j.overall_points === 'number' ? j.overall_points : 0,
     overallRank: j.overall_rank || 0,
     classIndex: typeof j.class_i === 'number' ? j.class_i : null,
+    usedSpec: Number.isInteger(effectiveSpec) ? effectiveSpec : null,
     bosses
   };
 }
