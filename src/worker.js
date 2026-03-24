@@ -79,7 +79,8 @@ async function processCommandAsync(interaction, env, commandName) {
         break;
       default:
         result = {
-          content: 'Unknown command'
+          type: InteractionResponseType.CHANNEL_MESSAGE_WITH_SOURCE,
+          data: { content: 'Unknown command', flags: 64 }
         };
     }
     
@@ -98,6 +99,10 @@ async function sendFollowupMessage(interaction, env, messageData) {
   const followupUrl = `https://discord.com/api/v10/webhooks/${env.DISCORD_APPLICATION_ID}/${interaction.token}`;
   
   let response;
+  
+  if (!messageData || typeof messageData !== 'object') {
+    messageData = { content: 'An error occurred while processing your request.' };
+  }
   
   // Check if message has file attachments
   if (messageData.files && messageData.files.length > 0) {

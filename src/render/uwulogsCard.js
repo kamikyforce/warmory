@@ -1,20 +1,38 @@
 import puppeteer from '@cloudflare/puppeteer';
 
-export async function buildUwULogsCard(data, env) {
-  let browser;
-  try {
-    browser = await puppeteer.launch(env.MYBROWSER, {
-      args: ['--no-sandbox', '--disable-setuid-sandbox']
-    });
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1200, height: 900 });
-    const html = generateHTML(data);
-    await page.setContent(html, { waitUntil: 'networkidle0', timeout: 15000 });
-    const img = await page.screenshot({ type: 'png', fullPage: true, timeout: 15000 });
-    return img;
-  } finally {
-    if (browser) await browser.close();
+export async function buildUwULogsCard(data, env, opts = {}) {
+  const retries = typeof opts.retries === 'number' ? opts.retries : 2;
+  let lastErr = null;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    let browser;
+    try {
+      browser = await puppeteer.launch(env.MYBROWSER, {
+        args: ['--no-sandbox', '--disable-setuid-sandbox']
+      });
+      const page = await browser.newPage();
+      await page.setViewport({ width: 1200, height: 900 });
+      const html = generateHTML(data);
+      await page.setContent(html, { waitUntil: 'networkidle0', timeout: 15000 });
+      const img = await page.screenshot({ type: 'png', fullPage: true, timeout: 15000 });
+      return img;
+    } catch (e) {
+      lastErr = e;
+      const msg = String(e && e.message || e);
+      const isRate = msg.includes('429') || /rate limit/i.test(msg);
+      if (attempt < retries && isRate) {
+        await sleep(400 * Math.pow(2, attempt));
+        continue;
+      }
+      throw e;
+    } finally {
+      try { if (browser) await browser.close(); } catch {}
+    }
   }
+  throw lastErr || new Error('render failed');
+}
+
+function sleep(ms) {
+  return new Promise(r => setTimeout(r, ms));
 }
 
 function generateHTML({ name, server, overallPoints, overallRank, bosses }) {
