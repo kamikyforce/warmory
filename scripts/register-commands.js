@@ -48,6 +48,15 @@ const commands = [
         ]
       }
     ]
+  },
+  {
+    name: 'uwulogs',
+    description: 'UwU Logs points for a character/spec',
+    options: [
+      { name: 'name', description: 'Character name', type: 3, required: true },
+      { name: 'server', description: 'Server', type: 3, required: false },
+      { name: 'spec', description: 'Spec number (1-3)', type: 4, required: false }
+    ]
   }
 ];
 

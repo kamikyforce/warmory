@@ -2,6 +2,7 @@ import { InteractionType, InteractionResponseType, verifyKey } from 'discord-int
 import { armoryCommand } from './commands/armory.js';
 import { talentsCommand } from './commands/talents.js';
 import { initializeTables } from './scrape/warmane.js';
+import { uwulogsCommand } from './commands/uwulogs.js';
 
 export default {
   async fetch(request, env, ctx) {
@@ -72,6 +73,9 @@ async function processCommandAsync(interaction, env, commandName) {
         break;
       case 'talents':
         result = await talentsCommand.execute(interaction, env);
+        break;
+      case 'uwulogs':
+        result = await uwulogsCommand.execute(interaction, env);
         break;
       default:
         result = {
